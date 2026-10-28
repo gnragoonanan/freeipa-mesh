@@ -1,0 +1,36 @@
+{{- if and .Values.network.macvlan.enabled .Values.network.macvlan.createAttachment }}
+{{- $m := .Values.network.macvlan }}
+{{/*
+Each release creates its own attachment definition with an identical config.
+macvlan attachments are independent of one another, so this costs nothing and
+avoids the Helm ownership conflict that a single shared object would cause
+when several server releases are installed into one namespace.
+
+IPAM is static: addresses come from the pod annotation, which the chart
+generates from server.ip.
+*/}}
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: {{ include "freeipa.attachmentName" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "freeipa.labels" . | nindent 4 }}
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "type": "macvlan",
+      "capabilities": { "ips": true },
+      "master": {{ required "network.macvlan.hostInterface is required" $m.hostInterface | quote }},
+      "mode": {{ $m.mode | quote }},
+      "ipam": {
+        "type": "static"
+        {{- if $m.defaultGateway }},
+        "routes": [
+          { "dst": "0.0.0.0/0", "gw": {{ $m.defaultGateway | quote }} }
+        ]
+        {{- end }}
+      }
+    }
+{{- end }}

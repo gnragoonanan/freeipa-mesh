@@ -1,0 +1,21 @@
+{{- if and .Values.persistence.enabled (eq .Values.persistence.type "pvc") (not .Values.persistence.pvc.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "freeipa.fullname" . }}-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "freeipa.labels" . | nindent 4 }}
+  annotations:
+    # Keep the claim, and therefore the backups, if the release is removed.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.pvc.accessModes | nindent 4 }}
+  {{- if .Values.persistence.pvc.storageClass }}
+  storageClassName: {{ .Values.persistence.pvc.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.pvc.size | quote }}
+{{- end }}

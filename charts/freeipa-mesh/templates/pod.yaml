@@ -1,0 +1,177 @@
+{{- include "freeipa.validate" . }}
+{{/*
+One Pod per release, deliberately: a FreeIPA server is a stateful appliance
+with its own identity, certificate and replication agreements. It is not
+interchangeable with its peers, so a Deployment's rolling replacement
+semantics would be actively harmful. Availability comes from running several
+releases that replicate to each other, not from rescheduling one of them.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "freeipa.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "freeipa.labels" . | nindent 4 }}
+    freeipa.io/role: {{ .Values.server.role }}
+    {{- with .Values.podLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- if .Values.network.macvlan.enabled }}
+    k8s.v1.cni.cncf.io/networks: {{ include "freeipa.networkAnnotation" . | quote }}
+    {{- end }}
+    # Roll the pod when the installer script changes.
+    checksum/installer: {{ .Files.Get "scripts/freeipa-install.sh" | sha256sum }}
+    {{- with .Values.podAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  hostname: {{ .Values.server.hostname }}
+  restartPolicy: Always
+  {{- with .Values.priorityClassName }}
+  priorityClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.podSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: freeipa
+      image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      env:
+        # ---- this server's identity ----
+        - name: IPA_ROLE
+          value: {{ .Values.server.role | quote }}
+        - name: IPA_HOSTNAME
+          value: {{ .Values.server.hostname | quote }}
+        - name: IPA_FQDN
+          value: {{ include "freeipa.fqdn" . | quote }}
+        - name: IPA_SERVER_IP
+          value: {{ .Values.server.ip | quote }}
+        # ---- realm ----
+        - name: IPA_DOMAIN
+          value: {{ .Values.ipa.domain | quote }}
+        - name: IPA_REALM
+          value: {{ include "freeipa.realm" . | quote }}
+        - name: IPA_ADMIN_USER
+          value: {{ .Values.ipa.adminUser | quote }}
+        - name: IPA_MASTER_FQDN
+          value: {{ include "freeipa.masterFqdn" . | quote }}
+        # ---- topology ----
+        # Semicolon-separated "ip fqdn short" records for every mesh member.
+        - name: IPA_HOSTS
+          value: {{ include "freeipa.hostsEntries" . | quote }}
+        # Semicolon-separated "short=ip" pairs the master publishes in DNS.
+        - name: IPA_REPLICA_RECORDS
+          value: {{ include "freeipa.replicaRecords" . | quote }}
+        # ---- dns ----
+        - name: IPA_SETUP_DNS
+          value: {{ .Values.ipa.setupDNS | quote }}
+        - name: IPA_DNS_FORWARDERS
+          value: {{ join ";" .Values.ipa.dnsForwarders | quote }}
+        - name: IPA_RESOLVER_NAMESERVERS
+          value: {{ join ";" .Values.resolver.nameservers | quote }}
+        # ---- credentials, by reference rather than by value ----
+        - name: IPA_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "freeipa.secretName" . }}
+              key: {{ .Values.auth.adminPasswordKey }}
+        - name: IPA_DM_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "freeipa.secretName" . }}
+              key: {{ .Values.auth.dmPasswordKey }}
+        # ---- storage, backup, installer ----
+        - name: IPA_DATA_DIR
+          value: {{ .Values.persistence.mountPath | quote }}
+        - name: IPA_PERSISTENCE_ENABLED
+          value: {{ .Values.persistence.enabled | quote }}
+        - name: IPA_BACKUP_ENABLED
+          value: {{ .Values.backup.enabled | quote }}
+        - name: IPA_BACKUP_SCHEDULE
+          value: {{ .Values.backup.schedule | quote }}
+        - name: IPA_BACKUP_KEEP_LAST
+          value: {{ .Values.backup.keepLast | quote }}
+        - name: IPA_LOG_FILE
+          value: {{ .Values.install.logFile | quote }}
+        - name: IPA_MASTER_WAIT_TIMEOUT
+          value: {{ .Values.install.masterWaitTimeout | quote }}
+        - name: IPA_UPGRADE_PACKAGES
+          value: {{ .Values.install.upgradePackages | quote }}
+        - name: IPA_EXTRA_SERVER_ARGS
+          value: {{ join " " .Values.ipa.extraServerInstallArgs | quote }}
+        - name: IPA_EXTRA_REPLICA_ARGS
+          value: {{ join " " .Values.ipa.extraReplicaInstallArgs | quote }}
+      lifecycle:
+        # The image boots systemd as PID 1, so the install cannot be the
+        # container command. postStart runs alongside it once PID 1 is up.
+        # The script is idempotent and exits early if FreeIPA is already
+        # configured, so a container restart does not try to reinstall.
+        postStart:
+          exec:
+            command:
+              - /bin/bash
+              - -c
+              - /opt/freeipa-installer/freeipa-install.sh
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      resources:
+        {{- toYaml .Values.resources | nindent 8 }}
+      volumeMounts:
+        - name: cgroup
+          mountPath: {{ .Values.systemd.cgroupHostPath }}
+          readOnly: true
+        - name: installer
+          mountPath: /opt/freeipa-installer
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          mountPath: {{ .Values.persistence.mountPath }}
+        {{- end }}
+  volumes:
+    - name: cgroup
+      hostPath:
+        path: {{ .Values.systemd.cgroupHostPath }}
+        type: DirectoryOrCreate
+    - name: installer
+      configMap:
+        name: {{ include "freeipa.fullname" . }}-installer
+        defaultMode: 0755
+    {{- if .Values.persistence.enabled }}
+    - name: data
+      {{- if eq .Values.persistence.type "nfs" }}
+      nfs:
+        server: {{ required "persistence.nfs.server is required when persistence.type is nfs" .Values.persistence.nfs.server | quote }}
+        path: {{ required "persistence.nfs.path is required when persistence.type is nfs" .Values.persistence.nfs.path | quote }}
+        readOnly: false
+      {{- else if eq .Values.persistence.type "pvc" }}
+      persistentVolumeClaim:
+        claimName: {{ default (printf "%s-data" (include "freeipa.fullname" .)) .Values.persistence.pvc.existingClaim }}
+      {{- else if eq .Values.persistence.type "hostPath" }}
+      hostPath:
+        path: {{ required "persistence.hostPath.path is required when persistence.type is hostPath" .Values.persistence.hostPath.path }}
+        type: DirectoryOrCreate
+      {{- else if eq .Values.persistence.type "emptyDir" }}
+      emptyDir: {}
+      {{- else }}
+      {{- fail (printf "persistence.type must be one of nfs, pvc, hostPath, emptyDir - got %q" .Values.persistence.type) }}
+      {{- end }}
+    {{- end }}

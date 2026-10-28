@@ -1,0 +1,34 @@
+apiVersion: v2
+name: freeipa-mesh
+description: High-availability FreeIPA on Kubernetes pods - an N-replica full replication mesh with routable macvlan IPs, scheduled backups and restore for DR.
+type: application
+
+# Chart version. Bump on every change to the chart or its templates (SemVer).
+version: 0.1.0
+
+# Version of FreeIPA this chart targets. The packages are installed from the
+# distribution repositories at pod start, so this tracks the major series
+# rather than an exact build.
+appVersion: "4.12"
+
+home: https://github.com/gnragoonanan/freeipa-mesh
+icon: https://raw.githubusercontent.com/gnragoonanan/freeipa-mesh/main/brand/logo-freeipa-mesh.svg
+
+sources:
+  - https://github.com/gnragoonanan/freeipa-mesh
+  - https://github.com/freeipa/freeipa
+
+keywords:
+  - freeipa
+  - identity-management
+  - kerberos
+  - ldap
+  - pki
+  - dns
+  - high-availability
+  - disaster-recovery
+
+annotations:
+  # Rendered by artifacthub.io if the chart is ever published there.
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/containsSecurityUpdates: "false"

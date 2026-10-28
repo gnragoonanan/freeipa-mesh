@@ -1,0 +1,50 @@
+# ---- secrets: never commit a values file holding real credentials ----
+# Convention: anything matching *-secret*.yaml or secrets.yaml stays local.
+secrets.yaml
+*-secret.yaml
+*-secrets.yaml
+*.secret.yaml
+# Local overrides. Copy an examples/ profile to my-values.yaml and edit it.
+my-values.yaml
+my-*.yaml
+values.local.yaml
+*.local.yaml
+
+# ---- credentials and keys ----
+*.pem
+*.key
+*.p12
+*.pfx
+*.kubeconfig
+kubeconfig
+
+# ---- helm ----
+*.tgz
+charts/*/charts/
+charts/*/Chart.lock
+.helm-release/
+
+# ---- macOS ----
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ---- editors ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- misc ----
+*.log
+*.bak
+*.orig
+*.tmp
+tmp/
+
+# ---- pre-publication backup of the original, environment-specific charts ----
+# Holds the real addresses, domains and passwords from before the scrub.
+# Never committed. Delete it once you have migrated your deployment.
+.local-backup/

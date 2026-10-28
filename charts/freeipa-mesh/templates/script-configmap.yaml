@@ -1,0 +1,17 @@
+{{/*
+The installer is shipped as a ConfigMap and mounted executable.
+
+It is read with .Files.Get rather than piped through `tpl`: the script takes
+every input from environment variables, so it needs no templating, and keeping
+Helm out of it means a future `{{` in the Bash would not break rendering.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "freeipa.fullname" . }}-installer
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "freeipa.labels" . | nindent 4 }}
+data:
+  freeipa-install.sh: |
+{{ .Files.Get "scripts/freeipa-install.sh" | indent 4 }}

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="freeipa-mesh logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1824"/>
+      <stop offset="1" stop-color="#17293d"/>
+    </linearGradient>
+    <!-- All stroke gradients use userSpaceOnUse: vertical and horizontal segments
+         have a zero-area bounding box, which makes an objectBoundingBox gradient
+         degenerate and the stroke invisible. -->
+    <linearGradient id="amber" gradientUnits="userSpaceOnUse" x1="106" y1="96" x2="406" y2="416">
+      <stop offset="0" stop-color="#ffd166"/>
+      <stop offset="0.55" stop-color="#f6a623"/>
+      <stop offset="1" stop-color="#e2761b"/>
+    </linearGradient>
+    <radialGradient id="hub" cx="0.38" cy="0.32" r="0.8">
+      <stop offset="0" stop-color="#ffe08a"/>
+      <stop offset="0.6" stop-color="#f6a623"/>
+      <stop offset="1" stop-color="#df7117"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="104" fill="url(#bg)"/>
+
+  <!-- replication spokes: every replica agrees with the authority -->
+  <g stroke="url(#amber)" stroke-width="7" stroke-linecap="round" opacity="0.4">
+    <line x1="256" y1="256" x2="256" y2="106"/>
+    <line x1="256" y1="256" x2="386" y2="181"/>
+    <line x1="256" y1="256" x2="386" y2="331"/>
+    <line x1="256" y1="256" x2="256" y2="406"/>
+    <line x1="256" y1="256" x2="126" y2="331"/>
+    <line x1="256" y1="256" x2="126" y2="181"/>
+  </g>
+
+  <!-- peer mesh ring: replicas replicate with each other, so any node can fail -->
+  <g stroke="url(#amber)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"
+     fill="none" filter="url(#glow)">
+    <polygon points="256,106 386,181 386,331 256,406 126,331 126,181"/>
+  </g>
+
+  <!-- replica nodes: the ring scales to any replica count -->
+  <g>
+    <circle cx="256" cy="106" r="27" fill="#0d1824" stroke="url(#amber)" stroke-width="11"/>
+    <circle cx="256" cy="106" r="9" fill="#ffd166"/>
+    <circle cx="386" cy="181" r="27" fill="#0d1824" stroke="url(#amber)" stroke-width="11"/>
+    <circle cx="386" cy="181" r="9" fill="#ffd166"/>
+    <circle cx="386" cy="331" r="27" fill="#0d1824" stroke="url(#amber)" stroke-width="11"/>
+    <circle cx="386" cy="331" r="9" fill="#ffd166"/>
+    <circle cx="256" cy="406" r="27" fill="#0d1824" stroke="url(#amber)" stroke-width="11"/>
+    <circle cx="256" cy="406" r="9" fill="#ffd166"/>
+    <circle cx="126" cy="331" r="27" fill="#0d1824" stroke="url(#amber)" stroke-width="11"/>
+    <circle cx="126" cy="331" r="9" fill="#ffd166"/>
+    <circle cx="126" cy="181" r="27" fill="#0d1824" stroke="url(#amber)" stroke-width="11"/>
+    <circle cx="126" cy="181" r="9" fill="#ffd166"/>
+  </g>
+
+  <!-- identity authority at the centre: keyhole = kerberos, LDAP, CA -->
+  <circle cx="256" cy="256" r="60" fill="url(#hub)"/>
+  <circle cx="256" cy="242" r="14" fill="#0d1824"/>
+  <path d="M248 252 L242 288 H270 L264 252 Z" fill="#0d1824"/>
+</svg>

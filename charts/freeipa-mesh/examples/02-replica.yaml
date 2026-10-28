@@ -1,0 +1,56 @@
+# Example: a replica joining an existing mesh.
+#
+#   helm install ipa2 charts/freeipa-mesh \
+#     --namespace freeipa \
+#     --values charts/freeipa-mesh/examples/02-replica.yaml
+#
+# Only the `server` block differs from the master's values. For a third, fourth
+# or tenth replica, copy this file and change server.hostname and server.ip,
+# adding the new host to topology.servers in every release.
+#
+# The replica waits for the master's LDAP port before joining, so it is safe to
+# install it immediately after the master; it will simply wait.
+
+namespace: freeipa
+
+server:
+  role: replica
+  hostname: ipa2
+  ip: 10.20.30.12
+
+ipa:
+  domain: ipa.example.test
+  setupDNS: true
+  dnsForwarders:
+    - 1.1.1.1
+    - 9.9.9.9
+
+auth:
+  existingSecret: freeipa-auth
+
+topology:
+  servers:
+    - hostname: ipa1
+      ip: 10.20.30.11
+      role: master
+    - hostname: ipa2
+      ip: 10.20.30.12
+    - hostname: ipa3
+      ip: 10.20.30.13
+
+network:
+  macvlan:
+    enabled: true
+    hostInterface: eth0
+    subnetPrefix: 24
+    defaultGateway: 10.20.30.1
+
+persistence:
+  enabled: true
+  type: nfs
+  nfs:
+    server: nfs.example.test
+    path: /exports/freeipa/ipa2
+
+backup:
+  enabled: true

@@ -1,0 +1,59 @@
+# Example: single-pod sandbox for quick chart testing.
+#
+# This profile replaces the separate throwaway chart that used to live in
+# freeipa-pod/. It is one master with no replicas, no macvlan and no NFS, so it
+# runs on a laptop cluster (kind, minikube, k3d) with nothing else set up.
+#
+#   helm install sandbox charts/freeipa-mesh \
+#     --namespace freeipa-sandbox --create-namespace \
+#     --values charts/freeipa-mesh/examples/sandbox.yaml \
+#     --set auth.adminPassword='ChangeMe123' \
+#     --set auth.dmPassword='ChangeMe456'
+#
+# Reach the Web UI without routable networking:
+#   kubectl -n freeipa-sandbox port-forward pod/sandbox-freeipa-mesh 8443:443
+#
+# NOT for production: no persistence means the realm, its CA and its backups are
+# destroyed with the pod.
+
+namespace: freeipa-sandbox
+
+server:
+  role: master
+  hostname: ipa1
+  ip: ""
+
+ipa:
+  domain: ipa.example.test
+  # The integrated DNS server wants to own a zone and bind port 53, which is
+  # awkward on a single sandbox node. Leave it off for smoke tests.
+  setupDNS: false
+
+topology:
+  servers:
+    - hostname: ipa1
+      ip: ""
+      role: master
+
+network:
+  macvlan:
+    enabled: false
+
+persistence:
+  enabled: false
+
+backup:
+  enabled: false
+
+# A sandbox rarely has 2Gi/1 CPU spare.
+resources:
+  requests:
+    memory: 2Gi
+    cpu: 500m
+  limits:
+    memory: 4Gi
+    cpu: 2000m
+
+install:
+  # Skip the full upgrade to start faster.
+  upgradePackages: false

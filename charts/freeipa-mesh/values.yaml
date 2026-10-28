@@ -1,0 +1,282 @@
+# Default values for freeipa-mesh.
+#
+# Every value here is a safe, generic placeholder. Nothing in this file refers
+# to a real network, domain or credential. The RFC 2606 reserved domain
+# "example.test" and the RFC 1918 range 10.20.30.0/24 are used throughout, so
+# an accidental deployment of the defaults cannot collide with, or leak into, a
+# real environment.
+#
+# You MUST override at minimum:
+#   ipa.domain, auth.*, server.*, topology.servers, network.macvlan.*
+#
+# See the values reference table in the project README for every parameter.
+
+# -- Kubernetes namespace to deploy into. Install with `--create-namespace`
+# (or create it yourself) rather than having the chart own the Namespace
+# object, so that several server releases can share one namespace.
+namespace: freeipa
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # -- Container image. Must run systemd as PID 1, because FreeIPA is a
+  # multi-service appliance managed by systemd units.
+  repository: buluma/fedora-systemd
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# -- References to image pull secrets, e.g. [{name: my-registry-creds}]
+imagePullSecrets: []
+
+# =============================================================================
+# This server's own identity
+# =============================================================================
+# One Helm release installs one FreeIPA server. Deploy the master first, then
+# each replica as its own release, changing only this block.
+server:
+  # -- Role of this server. "master" performs ipa-server-install and becomes
+  # the first CA. "replica" performs ipa-replica-install and joins the mesh.
+  role: master
+
+  # -- Short hostname of this server. The FQDN is "<hostname>.<ipa.domain>".
+  # Must match one of the entries in topology.servers.
+  hostname: ipa1
+
+  # -- IP address assigned to this pod on the macvlan network. Required when
+  # network.macvlan.enabled is true. Must match this host's entry in
+  # topology.servers.
+  ip: 10.20.30.11
+
+# =============================================================================
+# FreeIPA realm configuration
+# =============================================================================
+ipa:
+  # -- DNS domain for the IPA deployment. Use a domain you control. It must
+  # not be the same as, or a parent of, your cluster's internal DNS domain.
+  domain: ipa.example.test
+
+  # -- Kerberos realm. Defaults to the uppercased domain when left empty,
+  # which is the FreeIPA convention.
+  realm: ""
+
+  # -- Administrative account created at install time.
+  adminUser: admin
+
+  # -- Install and manage the integrated BIND DNS server (--setup-dns).
+  setupDNS: true
+
+  # -- Upstream DNS forwarders for the integrated DNS server. When empty the
+  # installer is run with --auto-forwarders and inherits the host resolvers.
+  dnsForwarders: []
+  # - 1.1.1.1
+  # - 9.9.9.9
+
+  # -- Extra arguments appended verbatim to ipa-server-install on the master.
+  extraServerInstallArgs: []
+
+  # -- Extra arguments appended verbatim to ipa-replica-install on replicas.
+  extraReplicaInstallArgs: []
+
+# =============================================================================
+# Credentials
+# =============================================================================
+# Passwords are delivered to the pod through a Secret and injected as
+# environment variables with secretKeyRef, so they do not appear in the pod
+# spec. Prefer auth.existingSecret: plaintext in a values file ends up in the
+# Helm release history inside the cluster.
+auth:
+  # -- Name of an existing Secret holding the passwords. When set, the chart
+  # creates no Secret of its own and the two password values are ignored.
+  existingSecret: ""
+
+  # -- Key in the Secret holding the IPA admin password.
+  adminPasswordKey: admin-password
+
+  # -- Key in the Secret holding the Directory Manager password.
+  dmPasswordKey: dm-password
+
+  # -- IPA admin password. Required unless existingSecret is set. Must be at
+  # least 8 characters. Install deliberately fails if this is left empty.
+  adminPassword: ""
+
+  # -- Directory Manager (389-ds) password. Required unless existingSecret is
+  # set. Use a different value from adminPassword.
+  dmPassword: ""
+
+# =============================================================================
+# Replication topology
+# =============================================================================
+# Every server in the mesh is listed here, and the same list is given to every
+# release. It is used to write /etc/hosts inside each pod and to register the
+# replica A records in the master's DNS zone.
+#
+# Add or remove entries to scale the mesh - there is no fixed replica count.
+# Exactly one entry must have role: master.
+topology:
+  servers:
+    - hostname: ipa1
+      ip: 10.20.30.11
+      role: master
+    - hostname: ipa2
+      ip: 10.20.30.12
+    - hostname: ipa3
+      ip: 10.20.30.13
+
+# =============================================================================
+# Pod resolver
+# =============================================================================
+resolver:
+  # -- Nameservers written to /etc/resolv.conf before installation, needed so
+  # the pod can reach the package repositories. After FreeIPA is installed its
+  # own DNS server takes over on the server itself.
+  nameservers:
+    - 1.1.1.1
+    - 9.9.9.9
+
+# =============================================================================
+# Networking
+# =============================================================================
+# FreeIPA expects a stable, routable address with working forward and reverse
+# DNS. A ClusterIP is not sufficient for clients outside the cluster, so each
+# pod is attached to the physical network with macvlan via Multus.
+network:
+  macvlan:
+    # -- Attach the pod to a macvlan network through Multus. Disable for a
+    # single-node sandbox where cluster-internal access is enough.
+    enabled: true
+
+    # -- Have this release create its own NetworkAttachmentDefinition. Each
+    # release creates a separate definition with an identical config, which
+    # avoids Helm ownership conflicts when several servers share a namespace.
+    # Set false to reference a definition managed elsewhere.
+    createAttachment: true
+
+    # -- Name of the NetworkAttachmentDefinition. Defaults to
+    # "<release>-macvlan" when empty. Set explicitly when createAttachment is
+    # false to point at an existing definition.
+    name: ""
+
+    # -- Host interface the macvlan is parented to, e.g. eth0, bond0, vlan100.
+    # This interface must exist on every node the pod may be scheduled to.
+    hostInterface: eth0
+
+    # -- macvlan mode. "bridge" is correct for nearly all deployments.
+    mode: bridge
+
+    # -- CIDR prefix length of the macvlan subnet.
+    subnetPrefix: 24
+
+    # -- Default gateway for the pod. Leave empty to not set a default route.
+    defaultGateway: 10.20.30.1
+
+# -- Extra annotations merged onto the pod. The Multus network annotation is
+# generated from network.macvlan and does not need to be set here.
+podAnnotations: {}
+
+# -- Extra labels merged onto the pod.
+podLabels: {}
+
+# =============================================================================
+# Storage
+# =============================================================================
+persistence:
+  # -- Mount a volume at mountPath to hold backups and seed configuration.
+  # With this disabled, backups live only in the pod and are lost with it,
+  # which forfeits the DR half of the chart.
+  enabled: true
+
+  # -- Where the volume is mounted inside the container.
+  mountPath: /var/lib/ipa-data
+
+  # -- Volume source: nfs, pvc, hostPath or emptyDir.
+  type: nfs
+
+  nfs:
+    # -- NFS server hostname or address.
+    server: nfs.example.test
+    # -- Exported path on the NFS server.
+    path: /exports/freeipa
+
+  pvc:
+    # -- Use an existing PersistentVolumeClaim instead of creating one.
+    existingClaim: ""
+    # -- StorageClass for the created claim. Empty uses the cluster default.
+    storageClass: ""
+    # -- Access modes for the created claim.
+    accessModes:
+      - ReadWriteOnce
+    # -- Size of the created claim.
+    size: 10Gi
+
+  hostPath:
+    # -- Directory on the node, used when type is hostPath. Node-local, so the
+    # pod must stay pinned to one node.
+    path: /srv/freeipa
+
+systemd:
+  # -- Host cgroup filesystem, mounted read-only so systemd can run inside
+  # the container.
+  cgroupHostPath: /sys/fs/cgroup
+
+# =============================================================================
+# Backup and disaster recovery
+# =============================================================================
+backup:
+  # -- Install a root cron job running ipa-backup on a schedule and copying
+  # the result to persistence.mountPath.
+  enabled: true
+
+  # -- Cron schedule for the backup. Default is 01:00 every Sunday.
+  schedule: "0 1 * * 0"
+
+  # -- Number of recent backups to keep. Older ones are pruned after each run.
+  keepLast: 5
+
+# =============================================================================
+# Pod scheduling and security
+# =============================================================================
+# FreeIPA under systemd needs a privileged container: it loads kernel modules,
+# manages network configuration and writes to the host cgroup hierarchy.
+# This is a significant privilege grant - see SECURITY.md.
+securityContext:
+  privileged: true
+  capabilities:
+    add:
+      - SYS_ADMIN
+      - SYS_MODULE
+      - NET_ADMIN
+
+podSecurityContext: {}
+
+resources:
+  requests:
+    memory: 2Gi
+    cpu: 1000m
+  limits:
+    memory: 4Gi
+    cpu: 2000m
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -- PriorityClass for the pod. Identity servers are usually worth protecting
+# from eviction.
+priorityClassName: ""
+
+# =============================================================================
+# Installer behaviour
+# =============================================================================
+install:
+  # -- Log file for the in-container installer. Read it with
+  # `kubectl exec <pod> -- cat <path>` while the install runs.
+  logFile: /var/log/freeipa-install.log
+
+  # -- Seconds a replica waits for the master's LDAP port to answer before
+  # giving up on joining.
+  masterWaitTimeout: 900
+
+  # -- Run `dnf upgrade` before installing FreeIPA. Slower start, but picks up
+  # current security patches.
+  upgradePackages: true

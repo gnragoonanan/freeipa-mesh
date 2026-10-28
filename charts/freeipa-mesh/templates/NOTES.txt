@@ -1,0 +1,94 @@
+{{- $fqdn := include "freeipa.fqdn" . -}}
+{{- $master := include "freeipa.masterFqdn" . -}}
+freeipa-mesh {{ .Chart.Version }} - release {{ .Release.Name }}
+
+  Role:      {{ .Values.server.role }}
+  FQDN:      {{ $fqdn }}
+  Realm:     {{ include "freeipa.realm" . }}
+  Namespace: {{ .Values.namespace }}
+{{- if .Values.network.macvlan.enabled }}
+  Address:   {{ .Values.server.ip }}/{{ .Values.network.macvlan.subnetPrefix }} on {{ .Values.network.macvlan.hostInterface }} (macvlan)
+{{- else }}
+  Address:   cluster-internal only (macvlan disabled)
+{{- end }}
+
+WHAT HAPPENS NOW
+----------------
+The pod stays in ContainerCreating for several minutes while packages install
+and FreeIPA configures itself. That is expected, not a hang. Follow along with:
+
+  kubectl -n {{ .Values.namespace }} exec {{ include "freeipa.fullname" . }} -- tail -f {{ .Values.install.logFile }}
+
+{{ if eq .Values.server.role "master" -}}
+NEXT: ADD REPLICAS
+------------------
+This is the master. Install each replica as its own release, giving it the same
+topology list and changing only the server block:
+
+Pass the same values file you used for this master - a new release cannot
+inherit values from another one, so --reuse-values does not apply here.
+{{ range .Values.topology.servers }}
+{{- if ne (default "replica" .role) "master" }}
+  helm install {{ .hostname }} <chart-path> --namespace {{ $.Values.namespace }} \
+    --values <your-values.yaml> \
+    --set server.role=replica \
+    --set server.hostname={{ .hostname }} \
+    --set server.ip={{ .ip }}
+{{ end -}}
+{{- end }}
+{{- else -}}
+NEXT: COMPLETE THE MESH
+-----------------------
+This replica replicates with the master. Replicas do not automatically
+replicate with each other, so with three or more servers add the peer
+agreements to remove the master as a single point of failure:
+
+  kubectl -n {{ .Values.namespace }} exec -it {{ include "freeipa.fullname" . }} -- \
+    ipa topologysegment-add domain --leftnode=<replica-a> --rightnode=<replica-b> --auto
+
+Check what exists with:
+
+  ipa topologysegment-find domain
+{{- end }}
+
+ACCESS
+------
+  Web UI:  https://{{ $fqdn }}/
+  User:    {{ .Values.ipa.adminUser }}
+  Password:
+    kubectl -n {{ .Values.namespace }} get secret {{ include "freeipa.secretName" . }} \
+      -o jsonpath='{.data.{{ .Values.auth.adminPasswordKey }}}' | base64 -d
+
+{{ if .Values.network.macvlan.enabled -}}
+Clients need to resolve {{ $fqdn }}. Either point them at the integrated DNS
+server, or add this to /etc/hosts for testing:
+{{ range .Values.topology.servers }}
+{{- if .ip }}
+  {{ .ip }}  {{ .hostname }}.{{ $.Values.ipa.domain }}  {{ .hostname }}
+{{- end }}
+{{- end }}
+{{ else -}}
+macvlan is disabled, so this server has no routable address. Reach it with:
+
+  kubectl -n {{ .Values.namespace }} port-forward pod/{{ include "freeipa.fullname" . }} 8443:443
+{{ end }}
+{{- if .Values.backup.enabled }}
+BACKUP
+------
+ipa-backup runs on '{{ .Values.backup.schedule }}', keeping {{ .Values.backup.keepLast }} copies
+{{- if .Values.persistence.enabled }} under {{ .Values.persistence.mountPath }}/backup.
+{{- else }} inside the pod only - persistence is disabled, so they are LOST with the pod.
+{{- end }}
+{{- else }}
+BACKUP
+------
+Scheduled backup is disabled. Set backup.enabled=true for the DR half of this chart.
+{{- end }}
+
+TEARDOWN
+--------
+Remove replicas before the master, and disconnect each one first, or the master
+keeps stale replication agreements:
+
+  kubectl -n {{ .Values.namespace }} exec -it <master-pod> -- ipa-replica-manage del <replica-fqdn> --clean
+  helm uninstall <replica-release> -n {{ .Values.namespace }}

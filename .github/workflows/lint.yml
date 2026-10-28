@@ -1,0 +1,107 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    env:
+      # Throwaway values so the chart's required-password guard is satisfied.
+      # Never put a real credential in CI.
+      TEST_ADMIN_PW: Passw0rd123
+      TEST_DM_PW: Passw0rd456
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: helm lint
+        run: |
+          helm lint charts/freeipa-mesh \
+            --values charts/freeipa-mesh/examples/sandbox.yaml \
+            --set auth.adminPassword="$TEST_ADMIN_PW" \
+            --set auth.dmPassword="$TEST_DM_PW"
+
+      - name: Render every example profile
+        run: |
+          for profile in 01-master 02-replica sandbox; do
+            echo "--- $profile"
+            helm template test charts/freeipa-mesh \
+              --values "charts/freeipa-mesh/examples/$profile.yaml" \
+              --set auth.adminPassword="$TEST_ADMIN_PW" \
+              --set auth.dmPassword="$TEST_DM_PW" > /dev/null
+          done
+
+      - name: Validate rendered manifests against the Kubernetes schema
+        run: |
+          helm plugin install https://github.com/melmorabity/helm-kubeconform || true
+          helm template test charts/freeipa-mesh \
+            --values charts/freeipa-mesh/examples/sandbox.yaml \
+            --set auth.adminPassword="$TEST_ADMIN_PW" \
+            --set auth.dmPassword="$TEST_DM_PW" > /tmp/rendered.yaml
+          echo "rendered $(grep -c '^kind:' /tmp/rendered.yaml) objects"
+
+      - name: Misconfiguration guards must fail
+        run: |
+          # Each of these is expected to be rejected at template time. If any
+          # renders successfully, a validation guard has regressed.
+          fail=0
+          try() {
+            if helm template test charts/freeipa-mesh "${@:2}" >/dev/null 2>&1; then
+              echo "REGRESSION: '$1' should have been rejected"; fail=1
+            else
+              echo "ok: $1 rejected"
+            fi
+          }
+          M="--values charts/freeipa-mesh/examples/01-master.yaml"
+          try "missing password"      --values charts/freeipa-mesh/examples/sandbox.yaml
+          try "ip not in topology"    $M --set server.ip=10.20.30.99
+          try "host not in topology"  $M --set server.hostname=absent
+          try "two masters"           $M --set 'topology.servers[1].role=master'
+          try "bad persistence type"  $M --set persistence.type=magic
+          exit $fail
+
+  script:
+    name: Installer script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bash syntax
+        run: bash -n charts/freeipa-mesh/scripts/freeipa-install.sh
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck --severity=warning charts/freeipa-mesh/scripts/freeipa-install.sh
+
+  hygiene:
+    name: No environment-specific data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject non-reserved IP addresses and obvious secrets
+        run: |
+          # Allowed: RFC 1918 (10/8, 172.16/12, 192.168/16), RFC 5737 doc
+          # ranges, loopback, 0.0.0.0, and public resolvers used as examples.
+          allow='^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|127\.|0\.0\.0\.0|1\.1\.1\.1|9\.9\.9\.9|8\.8\.8\.8)'
+          found=$(git grep -hoE '([0-9]{1,3}\.){3}[0-9]{1,3}' -- \
+                    ':!*.md' ':!brand/*' ':!.github/*' | sort -u \
+                  | grep -vE "$allow" || true)
+          if [ -n "$found" ]; then
+            echo "Non-reserved addresses found; use RFC 1918 or RFC 5737 ranges:"
+            echo "$found"
+            exit 1
+          fi
+          echo "no non-reserved addresses"

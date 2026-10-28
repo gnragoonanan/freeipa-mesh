@@ -1,0 +1,67 @@
+# Example: the first server in the mesh (the master).
+#
+# Install this release first and let it finish before adding any replica.
+#
+#   helm install ipa1 charts/freeipa-mesh \
+#     --namespace freeipa --create-namespace \
+#     --values charts/freeipa-mesh/examples/01-master.yaml
+#
+# Passwords: do NOT put them in this file. This profile expects the Secret
+# referenced by auth.existingSecret to exist already (see below). If you must
+# pass them inline instead, append:
+#
+#   --set auth.existingSecret="" \
+#   --set auth.adminPassword="$IPA_ADMIN_PW" --set auth.dmPassword="$IPA_DM_PW"
+#
+# Replace every address and domain below with your own.
+
+namespace: freeipa
+
+server:
+  role: master
+  hostname: ipa1
+  ip: 10.20.30.11
+
+ipa:
+  domain: ipa.example.test
+  # realm defaults to IPA.EXAMPLE.TEST
+  setupDNS: true
+  dnsForwarders:
+    - 1.1.1.1
+    - 9.9.9.9
+
+auth:
+  # Strongly preferred over inline passwords:
+  #   kubectl -n freeipa create secret generic freeipa-auth \
+  #     --from-literal=admin-password='...' --from-literal=dm-password='...'
+  existingSecret: freeipa-auth
+
+# The same topology list is given to every release in the mesh.
+topology:
+  servers:
+    - hostname: ipa1
+      ip: 10.20.30.11
+      role: master
+    - hostname: ipa2
+      ip: 10.20.30.12
+    - hostname: ipa3
+      ip: 10.20.30.13
+
+network:
+  macvlan:
+    enabled: true
+    hostInterface: eth0
+    subnetPrefix: 24
+    defaultGateway: 10.20.30.1
+
+persistence:
+  enabled: true
+  type: nfs
+  nfs:
+    server: nfs.example.test
+    path: /exports/freeipa/ipa1
+
+backup:
+  enabled: true
+  schedule: "0 1 * * 0"
+  keepLast: 5
