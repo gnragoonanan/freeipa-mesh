@@ -21,10 +21,14 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 log()  { printf '%s  %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
 die()  { log "ERROR: $*"; exit 1; }
 
-trap 'rc=$?; if [ "$rc" -ne 0 ]; then
-  log "FAILED (exit $rc). The container will be restarted and this script will"
-  log "resume; already-completed steps are skipped. Full log: $LOG_FILE"
-fi' EXIT
+on_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    log "FAILED (exit $rc). The container will be restarted and this script will"
+    log "resume; already-completed steps are skipped. Full log: $LOG_FILE"
+  fi
+}
+trap on_exit EXIT
 
 require_env() {
   local name
